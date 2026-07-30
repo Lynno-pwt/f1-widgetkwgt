@@ -1,12 +1,9 @@
-name: Update F1
+name: Update F1 JSON
 
 on:
-  workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
   update:
@@ -15,41 +12,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download F1 JSON
+      - name: Download API
         run: |
-          curl -L https://api.jolpi.ca/ergast/f1/current/next.json > raw.json
-
-      - name: Convert JSON
-        run: |
-          python3 - << 'EOF'
-          import json
-
-          with open("raw.json","r") as f:
-              data=json.load(f)
-
-          race=data["MRData"]["RaceTable"]["Races"][0]
-
-          out={
-            "gp":race["raceName"],
-            "track":race["Circuit"]["circuitName"],
-            "country":race["Circuit"]["Location"]["country"],
-            "city":race["Circuit"]["Location"]["locality"],
-            "date":race["date"],
-            "time":race["time"],
-            "fp1":race.get("FirstPractice",{}).get("date","")+" "+race.get("FirstPractice",{}).get("time",""),
-            "fp2":race.get("SecondPractice",{}).get("date","")+" "+race.get("SecondPractice",{}).get("time",""),
-            "fp3":race.get("ThirdPractice",{}).get("date","")+" "+race.get("ThirdPractice",{}).get("time",""),
-            "qualifying":race.get("Qualifying",{}).get("date","")+" "+race.get("Qualifying",{}).get("time","")
-          }
-
-          with open("f1.json","w") as f:
-              json.dump(out,f,indent=2)
-          EOF
+          curl -L https://api.jolpi.ca/ergast/f1/current/next.json \
+          -o f1.json
 
       - name: Commit
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add f1.json
-          git commit -m "Auto Update" || exit 0
-          git push
+          git diff --cached --quiet || git commit -m "Update F1"
+
+      - name: Push
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
