@@ -1,62 +1,81 @@
-name: Update F1 JSON
+name: Update F1 KWGT Data
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    - cron: '0 */6 * * *' # Berjalan otomatis setiap 6 jam
+  workflow_dispatch:      # Memungkinkan trigger manual dari tombol di GitHub
 
 jobs:
-  update:
+  update-json:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write     # Wajib ada agar GitHub Actions bot memiliki izin untuk push
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Download & Convert API
-        run: |
-          python << 'EOF'
-          import json
-          import urllib.request
-
-          url = "https://api.jolpi.ca/ergast/f1/current/next.json"
-
-          data = json.loads(
-              urllib.request.urlopen(url).read().decode()
-          )
-
-          race = data["MRData"]["RaceTable"]["Races"][0]
-
-          output = {
-              "gp": race["raceName"],
-              "track": race["Circuit"]["circuitName"],
-              "country": race["Circuit"]["Location"]["country"],
-              "city": race["Circuit"]["Location"]["locality"],
-              "date": race["date"],
-              "time": race["time"][:5]
-          }
-
-          with open("f1.json", "w", encoding="utf-8") as f:
-              json.dump(output, f, indent=2)
-          EOF
-
-      - name: Commit Changes
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-          git add f1.json
-
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Update F1 data"
-          fi
-
-      - name: Push Changes
-        uses: ad-m/github-push-action@master
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Mengambil seluruh histori commit untuk menghindari konflik
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Fetch and Transform Data (Python)
+        run: |
+          cat << 'EOF' > transform.py
+          import urllib.request
+          import json
+          import sys
+
+          url = 'https://api.jolpi.ca/ergast/f1/current/next.json'
+          req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+          
+          try:
+              with urllib.request.urlopen(req) as response:
+                  data = json.loads(response.read().decode())
+                  race = data['MRData']['RaceTable']['Races'][0]
+                  
+                  # Memotong format "13:00:00Z" menjadi "13:00"
+                  time_raw = race.get('time', '')
+                  time_formatted = time_raw[:5] if time_raw else ''
+                  
+                  output = {
+                      "gp": race.get('raceName'),
+                      "track": race['Circuit'].get('circuitName'),
+                      "country": race['Circuit']['Location'].get('country'),
+                      "city": race['Circuit']['Location'].get('locality'),
+                      "date": race.get('date'),
+                      "time": time_formatted
+                  }
+                  
+                  with open('f1.json', 'w') as f:
+                      json.dump(output, f, indent=2)
+                  
+                  print("✅ Berhasil mengubah format JSON")
+          except Exception as e:
+              print(f"❌ Error mengambil data: {e}")
+              sys.exit(1)
+          EOF
+          python transform.py
+
+      - name: Commit and Push (If Changed)
+        run: |
+          # Menggunakan identitas resmi bot GitHub Actions
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Hanya tambahkan file f1.json
+          git add f1.json
+          
+          # Cek apakah ada perubahan. Jika tidak, abaikan.
+          if git diff --staged --quiet; then
+            echo "🏁 Tidak ada perubahan data sirkuit. Skip commit."
+          else
+            git commit -m "Auto-update F1 data for KWGT"
+            # Baris di bawah ini adalah KUNCI untuk mengatasi error "fetch first"
+            git pull --rebase origin main
+            git push origin main
+            echo "🚀 Data terbaru berhasil di-push!"
+          fi
